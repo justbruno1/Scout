@@ -1,145 +1,131 @@
 # Scout
 
-Scout is an AI research analyst for crypto tokens. It combines real-time
-market data, DEX liquidity, contract security, and tokenomics into a
-single report — generated in under 30 seconds — and explained in plain
-language by an LLM that is only ever allowed to *explain* the numbers, never
-invent them.
+An AI agent research analyst for any token, in under 30 seconds.
 
-Scout is not a trading bot. Scout is not a chatbot. It's a research tool.
+![Next.js](https://img.shields.io/badge/Next.js-15-black) ![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue) 
 
-## Stack
+**Scout is analysis with receipts.** Not a trading bot. Not a chatbot. One question, one report:
 
-- **Next.js 15** (App Router) + TypeScript
-- **Tailwind CSS** for styling, **Framer Motion** for animation
-- **TanStack Query** + **Zustand** for client-side data/state
-- **Geist** font family (with Inter as fallback)
-- All data comes from real, free APIs — nothing is mocked or hardcoded
+| | What | Where |
+|---|---|---|
+| **You ask** | A ticker, a name, a contract address, or plain English — "Should I buy HYPE?" | The search box on the landing page |
+| **Scout answers** | A full research report: live price, tokenomics, security, a Decision Scorecard, and a unique investment thesis | `/analyze?q=...` |
 
-## Data sources
+The flow: you search a token, Scout fetches price, liquidity, security, and tokenomics data from four independent providers in parallel, resolves the single freshest price across them, computes a deterministic health score and confidence score from what it actually retrieved, and only then hands the complete dataset to Gemini — which returns a unique, evidence-grounded investment thesis for that specific token.
 
-| Source | Used for |
+**The one rule: never fabricate a metric.** Every number on the page traces back to a real API response. No verified data for a section means an honest "temporarily unavailable" or "Not Available," not an invented figure. That rule is enforced in `lib/reportBuilder.ts` and covered by the graceful-degradation path on every external call.
+
+c:\Users\NWA DEAN WINNERS\OneDrive\Pictures\assetreport.jpeg
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Providers["Data Providers"]
+        CG[CoinGecko]
+        DS[DexScreener]
+        GT[GeckoTerminal]
+        GP[GoPlus Security]
+    end
+
+    subgraph Backend["Next.js API Routes"]
+        RB[reportBuilder.ts]
+        PA[priceAggregator.ts]
+        SC[scoring.tsDecision Scorecard + Confidence]
+        AI[ai.tsGemini 2.5 Flash → Groq fallback]
+    end
+
+    UI[ReportView.tsx]
+
+    CG --> RB
+    DS --> RB
+    GT --> PA
+    GP --> RB
+    RB --> PA
+    PA --> SC
+    SC --> AI
+    AI --> UI
+```
+
+The AI is only ever handed data that's already been fetched, merged, and scored — it explains the numbers, it never invents or recalculates them.
+
+## Tech stack
+
+| Layer | Technology |
 |---|---|
-| [CoinGecko](https://www.coingecko.com/en/api) | Price, market cap, volume, FDV, metadata, search, historical prices |
-| [DexScreener](https://docs.dexscreener.com/api/reference) | Liquidity, trading pairs, DEX volume, pair info |
-| [GeckoTerminal](https://www.geckoterminal.com/dex-api) | Multi-chain DEX pool analytics |
-| [GoPlus Security](https://docs.gopluslabs.io/) | Honeypot detection, mint function, ownership, blacklist, tax |
-| **Gemini 2.5 Flash** | Primary LLM — synthesizes the above into the report |
-| **Groq** (Llama 3.3 70B) | Automatic fallback if Gemini is unavailable |
+| Frontend | Next.js 15 (App Router), React 18, TypeScript (strict), Tailwind CSS, Framer Motion, Lucide icons |
+| State / data fetching | TanStack Query, Zustand |
+| AI | Gemini 2.5 Flash (primary), Groq Llama 3.3 70B (automatic fallback) |
+| Market & on-chain data | CoinGecko, DexScreener, GeckoTerminal, GoPlus Security |
+| Deployment | Vercel-ready, server-side Next.js API routes keep all keys secret |
 
-## Getting started
+## Quick start
+
+Requires Node.js 20 or newer.
 
 ```bash
+git clone 
+cd scout
 npm install
 cp .env.example .env.local
-# fill in GEMINI_API_KEY (required) and GROQ_API_KEY (recommended fallback)
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open [http://localhost:3000](http://localhost:3000).
 
-### Required keys
+## Environment variables
 
-- **`GEMINI_API_KEY`** — free at [Google AI Studio](https://aistudio.google.com/apikey). Without this (and without Groq configured) Scout will still show all live market/security/community data, but the AI-written sections will show a "temporarily unavailable" message instead of crashing.
-- **`GROQ_API_KEY`** — free at [console.groq.com](https://console.groq.com/keys). Used only if Gemini fails or isn't configured.
+| Variable | Required by | Purpose |
+|---|---|---|
+| `GEMINI_API_KEY` | AI report generation | Primary LLM — get at [Google AI Studio](https://aistudio.google.com/apikey) |
+| `GROQ_API_KEY` | AI report generation | Automatic fallback if Gemini is unavailable — get at [console.groq.com](https://console.groq.com/keys) |
+| `COINGECKO_API_KEY` | Market data | Optional, raises free-tier rate limits |
+| `GOPLUS_API_KEY` | Contract security scanning |
 
-Everything else in `.env.example` is optional and only improves rate limits.
+Without `GEMINI_API_KEY` and `GROQ_API_KEY`, Scout still shows all live market/security/tokenomics data — only the AI-written sections (Investment Thesis, Analyst's Verdict, Key Risks) fall back to an honest "temporarily unavailable" message instead of crashing.
 
-## Project structure
+## Scripts
 
+| Script | What it does |
+|---|---|
+| `npm run dev` | Frontend dev server |
+| `npm run build` | Production build |
+| `npm start` | Serve the production build |
+| `npm run lint` | ESLint |
+
+## Verification
+
+Before shipping any change, run:
+
+```bash
+npx tsc --noEmit
+npm run build
 ```
-app/
-  page.tsx                 landing page (hero, chains, features)
-  analyze/page.tsx         single-token report page
-  compare/page.tsx         side-by-side comparison page
-  api/
-    analyze/route.ts       aggregates all data sources + AI report for one token
-    compare/route.ts       same, for 2-4 tokens + AI comparison conclusion
-    chat/route.ts          follow-up Q&A grounded in the generated report
-    search/route.ts        live search suggestions + natural-language intent detection
-components/                UI building blocks (Mascot, SearchBar, ReportView, ...)
+
+Both are run against every change in this repo before it's handed off — there's no CI workflow wired up yet, so this is a manual step for now.
+
+## Repository layout
+app/                    Next.js App Router pages and API routes
+page.tsx              Landing page (hero, how-it-works, features)
+analyze/page.tsx      Single-token report page
+compare/page.tsx      Side-by-side comparison page
+api/
+analyze/route.ts    Aggregates all data sources + AI report for one token
+compare/route.ts    Same, for 2-4 tokens + AI comparison conclusion
+chat/route.ts        Follow-up Q&A grounded in the generated report
+price/route.ts       Lightweight polling endpoint for the live price ticker
+search/route.ts      Live search suggestions + natural-language intent detection
+ticker/route.ts       Live rotating price ticker on the landing page
+components/            UI building blocks (Navbar, Hero, ReportView, Scorecard, ...)
 lib/
-  coingecko.ts, dexscreener.ts, geckoterminal.ts, goplus.ts, ticker.ts, priceAggregator.ts
-  ai.ts                    Gemini/Groq calls + prompt engineering
-  scoring.ts               deterministic health/risk scoring (not AI-guessed)
-  reportBuilder.ts         orchestrates all sources into one TokenReport
-  cache.ts                 short-TTL in-memory cache to respect free-tier limits
-store/useScoutStore.ts     zustand store (recent searches, per-token chat history)
-```
+coingecko.ts, dexscreener.ts, geckoterminal.ts, goplus.ts, ticker.ts
+priceAggregator.ts     Multi-source price resolution (freshest reading wins)
+scoring.ts             Deterministic Decision Scorecard + confidence score
+ai.ts                  Gemini/Groq calls, prompt engineering, JSON recovery
+reportBuilder.ts        Orchestrates every source into one TokenReport
+store/useScoutStore.ts   Zustand store (recent searches, per-token chat history)
+public/                  Logo, OG image, static assets
 
-## Design principles baked into the code
+## Deployment
 
-- **No mock data, ever.** Every number in a report traces back to a real API
-  response. If a source fails, that section is marked "temporarily
-  unavailable" — the app never fabricates numbers or crashes.
-- **No fixed recommendation labels.** Scout never outputs "Watch / Buy / Sell
-  / Hold". Instead every report gets a unique, evidence-grounded **Investment
-  Thesis**, **Supporting Evidence** tied to real metrics, **Key Risks**, and
-  a **"What Would Change This Outlook?"** section.
-- **Confidence is deterministic.** `lib/scoring.ts`'s `computeConfidenceScore`
-  derives the score from real data completeness (how many price sources
-  agreed, whether security/holder/liquidity data was available) — the LLM
-  is only ever handed that number to *explain*, never to invent. If the AI
-  call fails twice in a row, a deterministic fallback explanation is used
-  instead of surfacing any internal error to the user.
-- **The Decision Scorecard is deterministic.** All seven rows (Security,
-  Liquidity, Momentum, Volume, Holder Distribution, Token Age, Volatility)
-  plus the Overall Health Score are computed in `lib/scoring.ts` from real
-  metrics — the AI only ever *references* this scorecard.
-- **Multi-source price resolution.** `lib/priceAggregator.ts` compares price
-  readings from CoinGecko, DexScreener, and GeckoTerminal and picks the
-  freshest one, then shows its source and "updated Ns ago" — refreshed on
-  every analysis and polled every 20s while the report page stays open.
-- **Graceful degradation everywhere.** Every external call is wrapped so a
-  single failing API (rate limit, downtime) degrades one section of the
-  report instead of the whole page.
-
-## What's in this version
-
-- **Branding**: the official Scout "S" mark appears in the navbar, footer,
-  loading screen, browser tab (favicon), and Open Graph image
-  (`app/icon.png`, `app/apple-icon.png`, `public/og-image.png`,
-  `components/Logo.tsx`).
-- **Hero**: a small, subtle, slowly-rotating neon-green CSS 3D dot sphere
-  (`components/NeuralSphere.tsx`) replaces the old mascot dot, a live
-  rotating price ticker sits above the search box (`components/LiveTicker.tsx`
-  + `app/api/ticker/route.ts`), and an infinite marquee of data sources sits
-  below it (`components/Marquee.tsx`).
-- **Navbar**: sticky, glass-blurs on scroll, smooth-scrolls to `#how-it-works`
-  and `#features` (`components/Navbar.tsx`).
-- **Landing sections**: `SupportsRow` (replaces the old chains list),
-  `HowItWorks` (alternating 4-step layout), a trimmed 4-item `Features`
-  section (Reddit/"Social Intelligence" removed entirely).
-- **Report order** (`components/ReportView.tsx`): Live Price & Performance →
-  Asset Overview → Token Economy → Market & Liquidity Overview → Security
-  Analysis (PASS/WARNING/FAIL) → Holder Distribution → Decision Scorecard →
-  Investment Thesis → Supporting Evidence → Key Risks → What Would Change
-  This Outlook? → Confidence Score.
-- **Motion polish**: shared easing in `lib/motion.ts`, animated count-up
-  numbers (`components/CountUp.tsx`), expandable/collapsible long text
-  (`components/ExpandableText.tsx`).
-
-One honest caveat: a few "nice to have" fields (burned supply, inflation
-rate, exact liquidity-lock provider/duration, holder growth trend) aren't
-reliably exposed by any free-tier API, so those show "Not Available" rather
-than being guessed.
-
-## Extending Scout
-
-The architecture is intentionally left open for:
-
-- **Auth + saved watchlists** — add Supabase auth and a `watchlists` table;
-  the Zustand store's shape already separates "recent queries" from
-  potential persisted state.
-- **Alerts / portfolios** — `lib/reportBuilder.ts` is the single choke point
-  for "give me everything about token X"; a cron job or webhook can reuse it
-  directly.
-- **Wallet analysis** — add a new `lib/wallet.ts` source following the same
-  pattern as the existing clients (fetch → cache → typed return).
-- **Premium tiers** — API routes are already isolated per feature, so gating
-  by plan is a matter of adding a check at the top of each route handler.
-
-## Deploying
-
-Ready for Vercel: `vercel deploy`, then set the same environment variables
-from `.env.example` in the Vercel project settings.
+Ready for Vercel: `vercel deploy`, then set the environment variables from `.env.example` in the Vercel project settings.
