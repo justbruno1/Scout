@@ -160,7 +160,8 @@ export async function buildTokenReport(query: string): Promise<TokenReport> {
     confidenceScore,
     tokenAgeDays,
     pairAgeDays,
-    launchDate
+    launchDate,
+    volumeTrendPercent
   );
   
   return {

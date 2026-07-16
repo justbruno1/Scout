@@ -489,7 +489,17 @@ export function ReportView({ report }: { report: TokenReport }) {
         </Section>
       )}
 
-      {/* 11. Confidence Score — computed deterministically, the AI only explains it */}
+      {/* 11. Analyst's Verdict — short closing summary box */}
+      {ai.analystVerdict && (
+        <div className="mb-10 rounded-2xl border border-accent/30 bg-accent/[0.06] p-6">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-accent">
+            Analyst&apos;s Verdict
+          </p>
+          <p className="text-[15px] leading-relaxed text-text-primary">{ai.analystVerdict}</p>
+        </div>
+      )}
+
+      {/* 12. Confidence Score — computed deterministically, the AI only explains it */}
       <Section title="Confidence Score">
         <CountUp
           value={confidenceScore}
@@ -501,16 +511,6 @@ export function ReportView({ report }: { report: TokenReport }) {
           Scout explains data and risk — it never gives financial advice. You decide.
         </p>
       </Section>
-
-      {/* Analyst's Verdict — short closing summary box */}
-      {ai.analystVerdict && (
-        <div className="mb-10 rounded-2xl border border-accent/30 bg-accent/[0.06] p-6">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-accent">
-            Analyst&apos;s Verdict
-          </p>
-          <p className="text-[15px] leading-relaxed text-text-primary">{ai.analystVerdict}</p>
-        </div>
-      )}
 
       {/* Follow-up chat */}
       <FollowUpChat report={report} />

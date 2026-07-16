@@ -54,27 +54,21 @@ function buildDataBlock(
   confidenceScore: number,
   tokenAgeDays: number | undefined,
   pairAgeDays: number | undefined,
-  launchDate: string | undefined
+  launchDate: string | undefined,
+  volumeTrendPercent: number | undefined
 ) {
   return JSON.stringify(
     {
-      identity,
-      market,
-      launchDate,
-      tokenAgeDays,
-      pairAgeDays,
-      dex: {
-        totalLiquidityUsd: dex.totalLiquidityUsd,
-        pairCount: dex.pairCount,
-        primaryDexes: dex.primaryDexes,
-        primaryChains: dex.primaryChains,
-        topPair: dex.topPair,
-      },
+      tokenIdentity: identity,
+      marketData: market,
+      launchAndAge: { launchDate, tokenAgeDays, pairAgeDays },
+      dexAndLiquidityData: dex,
       topExchanges,
-      security: security.available
+      contractSecurity: security.available
         ? security
         : { available: false, note: "Security data unavailable for this chain/contract" },
       decisionScorecard: scorecard,
+      volumeTrendPercent,
       alreadyComputedConfidenceScore: confidenceScore,
     },
     null,
@@ -82,7 +76,12 @@ function buildDataBlock(
   );
 }
 
-async function callGemini(messages: { role: string; content: string }[]): Promise<string> {
+type LLMOptions = { json?: boolean };
+
+async function callGemini(
+  messages: { role: string; content: string }[],
+  options: LLMOptions = {}
+): Promise<string> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY not configured");
 
@@ -103,7 +102,11 @@ async function callGemini(messages: { role: string; content: string }[]): Promis
         // Generous output budget so a long, unique research-note thesis is
         // never silently truncated mid-JSON (which used to look identical
         // to "the AI failed" and triggered the placeholder every time).
-        generationConfig: { temperature: 0.6, maxOutputTokens: 3072 },
+        generationConfig: {
+          temperature: 0.6,
+          maxOutputTokens: 3072,
+          ...(options.json ? { responseMimeType: "application/json" } : {}),
+        },
       }),
     }
   );
@@ -122,7 +125,10 @@ async function callGemini(messages: { role: string; content: string }[]): Promis
   return text;
 }
 
-async function callGroq(messages: { role: string; content: string }[]): Promise<string> {
+async function callGroq(
+  messages: { role: string; content: string }[],
+  options: LLMOptions = {}
+): Promise<string> {
   const key = process.env.GROQ_API_KEY;
   if (!key) throw new Error("GROQ_API_KEY not configured");
 
@@ -137,6 +143,7 @@ async function callGroq(messages: { role: string; content: string }[]): Promise<
       messages,
       temperature: 0.6,
       max_tokens: 2048,
+      ...(options.json ? { response_format: { type: "json_object" } } : {}),
     }),
   });
 
@@ -151,12 +158,15 @@ async function callGroq(messages: { role: string; content: string }[]): Promise<
 }
 
 /** Calls Gemini first, falls back to Groq if Gemini fails or is unconfigured. */
-async function callLLM(messages: { role: string; content: string }[]): Promise<string> {
+async function callLLM(
+  messages: { role: string; content: string }[],
+  options: LLMOptions = {}
+): Promise<string> {
   try {
-    return await callGemini(messages);
+    return await callGemini(messages, options);
   } catch (geminiErr) {
     try {
-      return await callGroq(messages);
+      return await callGroq(messages, options);
     } catch (groqErr) {
       throw new Error(
         `Both AI providers failed. Gemini: ${(geminiErr as Error).message}. Groq: ${(groqErr as Error).message}`
@@ -262,6 +272,92 @@ function parseReport(raw: string): ParsedAIReport | null {
   return parseReportStrict(raw) ?? parseReportRecovered(raw);
 }
 
+function formatUsd(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  if (Math.abs(value) >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${value.toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
+}
+
+function formatPercent(value: number | undefined): string | undefined {
+  return value === undefined || !Number.isFinite(value) ? undefined : `${value.toFixed(1)}%`;
+}
+
+/** A data-only safety net for provider outages; never return a fixed apology as a thesis. */
+function buildEvidenceBasedFallback(
+  identity: TokenIdentity,
+  market: MarketData,
+  dex: DexData,
+  security: SecurityData,
+  topExchanges: ExchangeListing[],
+  launchDate: string | undefined
+): Pick<
+  AIReport,
+  "investmentThesis" | "analystVerdict" | "overview" | "supportingReasons" | "keyRisks" | "outlookPositive" | "outlookNegative"
+> {
+  const sector = identity.category ?? market.categories?.[0] ?? "digital asset";
+  const position = [
+    market.marketCapRank ? `market-cap rank #${market.marketCapRank}` : undefined,
+    formatUsd(market.marketCap) ? `market cap of ${formatUsd(market.marketCap)}` : undefined,
+    identity.chain ? `presence on ${identity.chain}` : undefined,
+  ].filter((item): item is string => Boolean(item));
+  const liquidity = formatUsd(dex.totalLiquidityUsd);
+  const volume = formatUsd(market.volume24h);
+  const performance = formatPercent(market.change24h);
+  const exchanges = topExchanges.slice(0, 3).map((exchange) => exchange.name);
+  const securitySignals = security.available
+    ? [
+        security.isHoneypot === false ? "no honeypot flag" : undefined,
+        security.isMintable === false ? "no unrestricted mint flag" : undefined,
+        security.isOpenSource ? "verified source code" : undefined,
+      ].filter((item): item is string => Boolean(item))
+    : [];
+  const risks = [
+    ...security.flags,
+    security.top10HolderPercent !== undefined
+      ? `top 10 holders control ${security.top10HolderPercent.toFixed(1)}% of supply`
+      : undefined,
+    security.isMintable ? "the contract reports a mint function" : undefined,
+    security.isProxy ? "the contract is upgradeable through a proxy" : undefined,
+    liquidity ? undefined : "DEX liquidity data is unavailable",
+  ].filter((item): item is string => Boolean(item));
+  const support = [
+    liquidity ? `${liquidity} of tracked DEX liquidity across ${dex.pairCount} pair${dex.pairCount === 1 ? "" : "s"}` : undefined,
+    volume ? `${volume} of 24-hour trading volume` : undefined,
+    exchanges.length ? `listed on ${exchanges.join(", ")}` : undefined,
+    securitySignals.length ? `security checks show ${securitySignals.join(", ")}` : undefined,
+    launchDate ? `launch data is available from ${new Date(launchDate).toLocaleDateString()}` : undefined,
+  ].filter((item): item is string => Boolean(item));
+  const marketSentence = position.length
+    ? `${identity.name}'s current position is defined by ${position.join(", ")}.`
+    : `${identity.name}'s market position is constrained by the available live data.`;
+  const tradingSentence = [
+    liquidity ? `tracked DEX liquidity is ${liquidity}` : undefined,
+    volume ? `24-hour volume is ${volume}` : undefined,
+    performance ? `the latest 24-hour move is ${performance}` : undefined,
+  ].filter((item): item is string => Boolean(item)).join("; ");
+  const securitySentence = security.available
+    ? securitySignals.length
+      ? `Contract checks currently show ${securitySignals.join(", ")}.`
+      : "Contract security data is available, but it does not provide a strong positive signal by itself."
+    : "Contract security data is not available for this token, which limits risk assessment.";
+  const riskSentence = risks.length
+    ? `The main risks are ${risks.slice(0, 3).join("; ")}.`
+    : "The principal uncertainty is whether liquidity, volume, and adoption can remain durable as market conditions change.";
+  const outlookSentence = "A stronger outlook would require deeper liquidity, sustained trading activity, and clearer evidence of ecosystem adoption; weaker volume, deteriorating liquidity, or new contract-risk findings would undermine the case.";
+
+  return {
+    investmentThesis: `${identity.name} (${identity.symbol}) is a ${sector} asset. ${marketSentence} ${tradingSentence ? `${tradingSentence}.` : ""} ${securitySentence} ${riskSentence} ${outlookSentence} Based on the retrieved evidence, it merits assessment on its demonstrated market depth and risk profile rather than a generic label.`,
+    analystVerdict: `${identity.name} is best assessed through its ${sector} positioning, current liquidity and volume, and the specific contract-risk signals retrieved for this report.`,
+    overview: `${identity.name} (${identity.symbol}) is classified as ${sector}${identity.chain ? ` on ${identity.chain}` : ""}. ${marketSentence}`,
+    supportingReasons: support,
+    keyRisks: risks.length ? risks.slice(0, 5) : ["Live market data remains the main basis for assessing this token."],
+    outlookPositive: ["Sustained liquidity and trading-volume growth.", "Improving ecosystem adoption or exchange access."],
+    outlookNegative: ["Falling liquidity or trading activity.", "New contract-security or holder-concentration concerns."],
+  };
+}
+
 export async function generateTokenReport(
   identity: TokenIdentity,
   market: MarketData,
@@ -272,7 +368,8 @@ export async function generateTokenReport(
   confidenceScore: number,
   tokenAgeDays: number | undefined,
   pairAgeDays: number | undefined,
-  launchDate: string | undefined
+  launchDate: string | undefined,
+  volumeTrendPercent: number | undefined
 ): Promise<AIReport> {
   const dataBlock = buildDataBlock(
     identity,
@@ -284,7 +381,8 @@ export async function generateTokenReport(
     confidenceScore,
     tokenAgeDays,
     pairAgeDays,
-    launchDate
+    launchDate,
+    volumeTrendPercent
   );
 
   const messages = [
@@ -301,20 +399,19 @@ export async function generateTokenReport(
       holderDataAvailable: security.top10HolderPercent !== undefined,
       dexPairCount: dex.pairCount,
     });
-
-  let sawAnyResponse = false;
+  const evidenceFallback = () =>
+    buildEvidenceBasedFallback(identity, market, dex, security, topExchanges, launchDate);
 
   // Two attempts: most transient issues (rate limits, one-off truncation)
-  // don't repeat. Every attempt tries a strict parse first, then a
-  // regex-based recovery of the real fields before ever giving up.
+  // don't repeat. Every attempt uses provider-enforced JSON plus recovery.
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const raw = await callLLM(messages);
-      sawAnyResponse = true;
+      const raw = await callLLM(messages, { json: true });
       const parsed = parseReport(raw);
       if (parsed) {
         return {
           ...parsed,
+          analystVerdict: parsed.analystVerdict || evidenceFallback().analystVerdict,
           confidenceReasoning: parsed.confidenceReasoning || confidenceFallback(),
         };
       }
@@ -323,17 +420,12 @@ export async function generateTokenReport(
     }
   }
 
-  // We only reach here if two full attempts produced nothing usable. If the
-  // model responded at all (just couldn't be parsed/recovered), that's rare
-  // given the recovery pass above — but the placeholder below is reserved
-  // strictly for "the AI service itself never returned anything usable"
-  // rather than an ordinary formatting hiccup.
+  const fallback = evidenceFallback();
+
+  // A provider outage should never erase the investment thesis. This fallback
+  // uses only the token-specific dataset already collected for this report.
   return {
-    investmentThesis: sawAnyResponse
-      ? "Scout's AI analyst returned a response that couldn't be read this time, even after a retry. The market, security, and scorecard data above is live and accurate and can be reviewed directly — please try analyzing this token again in a moment."
-      : "Scout's AI analyst is temporarily unavailable, so no investment thesis could be generated this time. The market, security, and scorecard data above is live and accurate and can be reviewed directly.",
-    analystVerdict: "",
-    overview: `${identity.name} (${identity.symbol}) data is shown above from live sources. A written overview could not be generated this time.`,
+    ...fallback,
     marketActivitySummary: "",
     tokenomicsExplanation: fallbackTokenomicsExplanation(
       market.circulatingSupply,
@@ -344,10 +436,6 @@ export async function generateTokenReport(
       market.marketCap,
       dex.totalLiquidityUsd
     ),
-    supportingReasons: [],
-    keyRisks: [],
-    outlookPositive: [],
-    outlookNegative: [],
     confidenceReasoning: confidenceFallback(),
   };
 }
@@ -421,7 +509,7 @@ export async function classifyIntent(query: string): Promise<{
         role: "user",
         content: `Query: "${query}"\n\nRespond with JSON: {"intent": "analyze" | "compare" | "question", "tokens": string[]} where tokens are the token tickers or names mentioned (uppercase tickers where possible). Use "compare" only if two or more tokens are being compared against each other. Use "question" only if this is a general question not naming a specific token to analyze.`,
       },
-    ]);
+    ], { json: true });
     const parsed = JSON.parse(extractJsonSubstring(raw));
     return {
       intent: parsed.intent ?? "analyze",

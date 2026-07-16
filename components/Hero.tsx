@@ -51,8 +51,7 @@ export function Hero() {
         transition={{ duration: 0.7, delay: 0.15, ease: EASE_SMOOTH }}
         className="mt-6 max-w-xl text-balance text-base text-text-secondary sm:text-lg"
       >
-        Scout is an AI research analyst that reads the market, the chain, and the
-        crowd — then explains it to you in plain English.
+        Scout combines live market data, security analysis, liquidity, and onchain metrics into actionable research reports.
       </motion.p>
 
       <motion.div
