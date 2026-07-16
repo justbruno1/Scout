@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+* {
+  border-color: theme("colors.border.DEFAULT");
+}
+
+html,
+body {
+  background: #111315;
+}
+
+body {
+  font-feature-settings: "ss01", "cv01", "cv11";
+}
+
+::selection {
+  background: rgba(200, 255, 61, 0.25);
+  color: #f6f6f4;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #232629;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2c3033;
+}
+
+.divider {
+  height: 1px;
+  width: 100%;
+  background: linear-gradient(
+    to right,
+    transparent,
+    #232629 15%,
+    #232629 85%,
+    transparent
+  );
+}
+
+@keyframes scout-sphere-spin {
+  from {
+    transform: rotateY(0deg);
+  }
+  to {
+    transform: rotateY(360deg);
+  }
+}
+
+.scout-sphere {
+  animation: scout-sphere-spin 34s linear infinite;
+}
+
+@keyframes scout-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.scout-marquee-track {
+  animation: scout-marquee 26s linear infinite;
+}
+
+.mono-tabular {
+  font-family: var(--font-geist-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid #c8ff3d;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
