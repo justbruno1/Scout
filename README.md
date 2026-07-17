@@ -15,7 +15,7 @@ The flow: you search a token, Scout fetches price, liquidity, security, and toke
 
 **The one rule: never fabricate a metric.** Every number on the page traces back to a real API response. No verified data for a section means an honest "temporarily unavailable" or "Not Available," not an invented figure. That rule is enforced in `lib/reportBuilder.ts` and covered by the graceful-degradation path on every external call.
 
-c:\Users\NWA DEAN WINNERS\OneDrive\Pictures\assetreport.jpeg
+![alt text](assetreport.jpeg)
 
 ## Architecture
 
