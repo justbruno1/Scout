@@ -8,10 +8,12 @@ An AI agent research analyst for any token, in under 30 seconds.
 
 | | What | Where |
 |---|---|---|
-| **You ask** | A ticker, a name, a contract address, or plain English — "Should I buy HYPE?" | The search box on the landing page |
-| **Scout answers** | A full research report: live price, tokenomics, security, a Decision Scorecard, and a unique investment thesis | `/analyze?q=...` |
+| **You ask** | A ticker, a name, a contract address, or plain English — "Assess HYPE's risks" | The search box on the landing page |
+| **Scout answers** | A full research report: live price, tokenomics, security, a Decision Scorecard, and a unique evidence-based thesis | `/analyze?q=...` |
 
-The flow: you search a token, Scout fetches price, liquidity, security, and tokenomics data from four independent providers in parallel, resolves the single freshest price across them, computes a deterministic health score and confidence score from what it actually retrieved, and only then hands the complete dataset to Gemini — which returns a unique, evidence-grounded investment thesis for that specific token.
+The flow: you search a token, Scout fetches price, liquidity, security, and tokenomics data from four independent providers in parallel, resolves the single freshest price across them, computes a deterministic health score and confidence score from what it actually retrieved, and only then hands the complete dataset to Gemini — which returns a unique, evidence-grounded research thesis for that specific token.
+
+Scout is an evidence-based research and risk-analysis tool, not an investment adviser. It does not provide personalised investment recommendations or tell users to buy, sell, or hold an asset.
 
 **The one rule: never fabricate a metric.** Every number on the page traces back to a real API response. No verified data for a section means an honest "temporarily unavailable" or "Not Available," not an invented figure. That rule is enforced in `lib/reportBuilder.ts` and covered by the graceful-degradation path on every external call.
 
@@ -57,7 +59,7 @@ The AI is only ever handed data that's already been fetched, merged, and scored 
 | State / data fetching | TanStack Query, Zustand |
 | AI | Gemini 2.5 Flash (primary), Groq Llama 3.3 70B (automatic fallback) |
 | Market & on-chain data | CoinGecko, DexScreener, GeckoTerminal, GoPlus Security |
-| Deployment | Vercel-ready, server-side Next.js API routes keep all keys secret |
+| Deployment | Vercel-ready, custom production domain `https://askscout.xyz`; server-side Next.js API routes keep all keys secret |
 
 ## Quick start
 
@@ -81,8 +83,12 @@ Open [http://localhost:3000](http://localhost:3000).
 | `GROQ_API_KEY` | AI report generation | Automatic fallback if Gemini is unavailable — get at [console.groq.com](https://console.groq.com/keys) |
 | `COINGECKO_API_KEY` | Market data | Optional, raises free-tier rate limits |
 | `GOPLUS_API_KEY` | Contract security scanning |
+| `ASKSCOUT_PUBLIC_URL` | Canonical public URL — `https://askscout.xyz` in production |
+| `ASKSCOUT_ALLOWED_ORIGINS` | Comma-separated allowed browser origins for the paid API |
+| `PAY_TO` | Optional receiving EVM wallet override; defaults to Scout #6136's owner wallet |
+| `X402_PRICE_ATOMIC` | Optional USDT0 amount in atomic units; default `100000` (= 0.10 USDT0) |
 
-Without `GEMINI_API_KEY` and `GROQ_API_KEY`, Scout still shows all live market/security/tokenomics data — only the AI-written sections (Investment Thesis, Analyst's Verdict, Key Risks) fall back to an honest "temporarily unavailable" message instead of crashing.
+Without `GEMINI_API_KEY` and `GROQ_API_KEY`, Scout still shows all live market/security/tokenomics data, while the AI-written sections use evidence from the retrieved dataset rather than making up unavailable metrics.
 
 ## Scripts
 
@@ -103,6 +109,29 @@ npm run build
 ```
 
 Both are run against every change in this repo before it's handed off — there's no CI workflow wired up yet, so this is a manual step for now.
+
+## Production API and x402 payments
+
+The canonical production service is **https://askscout.xyz**. Public operational routes are:
+
+| Route | Purpose |
+|---|---|
+| `GET /health` | Uncached health response: `{"status":"healthy","version":"1.0"}` |
+| `GET /docs` | Browser-readable API and payment-flow documentation |
+| `GET` or `POST /api/v1/analyze` | Paid token-analysis API; query is supplied as `q` |
+
+`/api/v1/analyze` implements the x402 v2 discovery flow. Both `GET` and `POST` return HTTP `402` with a JSON `accepts` array and a base64-encoded `PAYMENT-REQUIRED` header. The offer is for 0.10 USDT0 on X Layer and is available without any seller API credential, so buyers can validate the endpoint before beginning a payment replay.
+
+The endpoint never returns a report on an unsigned or unverified replay. `PAY_TO` is optional because the registered Scout owner wallet is the default payment recipient; set it only if you want payments routed to a different EVM wallet.
+
+For a local protocol check, run the server with non-production test values, then:
+
+```bash
+npm run x402-check
+npm run task-402-pay
+```
+
+The first validates the 402 challenge; the second verifies that an unsigned/malformed pay attempt is rejected without producing a report. A live settlement test requires an actual configured facilitator and a funded signing wallet.
 
 ## Repository layout
 app/                    Next.js App Router pages and API routes
