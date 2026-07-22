@@ -83,8 +83,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | `GROQ_API_KEY` | AI report generation | Automatic fallback if Gemini is unavailable — get at [console.groq.com](https://console.groq.com/keys) |
 | `COINGECKO_API_KEY` | Market data | Optional, raises free-tier rate limits |
 | `GOPLUS_API_KEY` | Contract security scanning |
-| `ASKSCOUT_PUBLIC_URL` | Canonical public URL — `https://askscout.xyz` in production |
-| `ASKSCOUT_ALLOWED_ORIGINS` | Comma-separated allowed browser origins for the paid API |
+| `SCOUT_PUBLIC_URL` | Canonical public URL — `https://askscout.xyz` in production |
+| `SCOUT_ALLOWED_ORIGINS` | Comma-separated allowed browser origins for the paid API |
 | `PAY_TO` | Optional receiving EVM wallet override; defaults to Scout #6136's owner wallet |
 | `X402_PRICE_ATOMIC` | Optional USDT0 amount in atomic units; default `100000` (= 0.10 USDT0) |
 
