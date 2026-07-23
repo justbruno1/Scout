@@ -7,7 +7,7 @@ export default function DocsPage() {
   return (
     <main className="mx-auto min-h-screen max-w-3xl px-6 py-16 text-slate-900 dark:text-slate-100">
       <h1 className="text-4xl font-bold">Scout API</h1>
-      <p className="mt-4 text-lg">The public production endpoint is <code>https://askscout.xyz</code>.</p>
+      <p className="mt-4 text-lg">The direct public production endpoint is <code>https://www.askscout.xyz</code>.</p>
       <section className="mt-10 space-y-3">
         <h2 className="text-2xl font-semibold">Health</h2>
         <p><code>GET /health</code> returns a public, uncached health response.</p>
@@ -15,8 +15,8 @@ export default function DocsPage() {
       <section className="mt-10 space-y-3">
         <h2 className="text-2xl font-semibold">Paid token analysis</h2>
         <p><code>GET or POST /api/v1/analyze</code> accepts a token query as <code>q</code>. A request without payment receives HTTP 402 with both an <code>accepts</code> array and a base64-encoded <code>PAYMENT-REQUIRED</code> header.</p>
-        <pre className="overflow-x-auto rounded bg-slate-950 p-4 text-sm text-slate-100">{`curl 'https://askscout.xyz/api/v1/analyze?q=ETH'\n# HTTP 402 → read PAYMENT-REQUIRED\n# sign one accepted option and retry with PAYMENT-SIGNATURE`}</pre>
-        <p>Scout uses x402 v2. A replay without a verified payment is challenged again and never generates a report.</p>
+        <pre className="overflow-x-auto rounded bg-slate-950 p-4 text-sm text-slate-100">{`curl 'https://www.askscout.xyz/api/v1/analyze?q=ETH'\n# HTTP 402 → read PAYMENT-REQUIRED\n# sign one accepted option and retry with PAYMENT-SIGNATURE or X-PAYMENT`}</pre>
+        <p>Scout uses x402 v2. A verified payment is settled before the report is returned; unverified replays never generate a report.</p>
       </section>
       <section className="mt-10 space-y-3">
         <h2 className="text-2xl font-semibold">Operational behavior</h2>

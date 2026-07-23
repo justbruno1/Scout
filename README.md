@@ -83,10 +83,13 @@ Open [http://localhost:3000](http://localhost:3000).
 | `GROQ_API_KEY` | AI report generation | Automatic fallback if Gemini is unavailable — get at [console.groq.com](https://console.groq.com/keys) |
 | `COINGECKO_API_KEY` | Market data | Optional, raises free-tier rate limits |
 | `GOPLUS_API_KEY` | Contract security scanning |
-| `SCOUT_PUBLIC_URL` | Canonical public URL — `https://askscout.xyz` in production |
-| `SCOUT_ALLOWED_ORIGINS` | Comma-separated allowed browser origins for the paid API |
+| `ASKSCOUT_PUBLIC_URL` | Canonical public URL — `https://askscout.xyz` in production |
+| `ASKSCOUT_ALLOWED_ORIGINS` | Comma-separated allowed browser origins for the paid API |
+| `OKX_API_KEY` | Authenticated facilitator API key; required for signed-payment verification and settlement |
+| `OKX_SECRET_KEY` | Secret for the same facilitator key |
+| `OKX_PASSPHRASE` | Passphrase for the same facilitator key |
 | `PAY_TO` | Optional receiving EVM wallet override; defaults to Scout #6136's owner wallet |
-| `X402_PRICE_ATOMIC` | Optional USDT0 amount in atomic units; default `100000` (= 0.10 USDT0) |
+| `X402_PRICE_USD` | Per-report price, default `$0.10` |
 
 Without `GEMINI_API_KEY` and `GROQ_API_KEY`, Scout still shows all live market/security/tokenomics data, while the AI-written sections use evidence from the retrieved dataset rather than making up unavailable metrics.
 
@@ -120,9 +123,9 @@ The canonical production service is **https://askscout.xyz**. Public operational
 | `GET /docs` | Browser-readable API and payment-flow documentation |
 | `GET` or `POST /api/v1/analyze` | Paid token-analysis API; query is supplied as `q` |
 
-`/api/v1/analyze` implements the x402 v2 discovery flow. Both `GET` and `POST` return HTTP `402` with a JSON `accepts` array and a base64-encoded `PAYMENT-REQUIRED` header. The offer is for 0.10 USDT0 on X Layer and is available without any seller API credential, so buyers can validate the endpoint before beginning a payment replay.
+`/api/v1/analyze` implements the x402 v2 payment flow. Both `GET` and `POST` return HTTP `402` with a JSON `accepts` array and a base64-encoded `PAYMENT-REQUIRED` header. A signed `PAYMENT-SIGNATURE` or `X-PAYMENT` replay is verified and settled by the authenticated OKX facilitator before Scout returns the report.
 
-The endpoint never returns a report on an unsigned or unverified replay. `PAY_TO` is optional because the registered Scout owner wallet is the default payment recipient; set it only if you want payments routed to a different EVM wallet.
+Set `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE` in Vercel Production before deployment. These are required only for the signed-payment replay: they authenticate the facilitator that verifies EIP-3009 authorization and settles the payment. `PAY_TO` is optional because the registered Scout owner wallet is the default payment recipient.
 
 For a local protocol check, run the server with non-production test values, then:
 

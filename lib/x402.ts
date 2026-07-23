@@ -1,85 +1,157 @@
+import { OKXFacilitatorClient } from "@okxweb3/x402-core";
+import {
+  type HTTPAdapter,
+  type HTTPProcessResult,
+  type RouteConfig,
+  x402HTTPResourceServer,
+  x402ResourceServer,
+} from "@okxweb3/x402-core/server";
+import { ExactEvmScheme } from "@okxweb3/x402-evm/exact/server";
 import { NextRequest } from "next/server";
 
 export const X402_PAYMENT_HEADER = "PAYMENT-SIGNATURE";
+export const X402_LEGACY_PAYMENT_HEADER = "X-PAYMENT";
 export const X402_REQUIRED_HEADER = "PAYMENT-REQUIRED";
 
 const X_LAYER_NETWORK = "eip155:196";
-const X_LAYER_USDT0 = "0x779ded0c9e1022225f8e0630b35a9b54be713736";
+const DEFAULT_PRICE = "$0.10";
 const SCOUT_OWNER_WALLET = "0xdd593acfdbbb438ca3850405819c1e7e70e0081a";
-const PRICE_ATOMIC = "100000"; // 0.10 USDT0 (6 decimals)
 
-type PaymentRequirement = {
-  scheme: "exact";
-  network: typeof X_LAYER_NETWORK;
-  asset: typeof X_LAYER_USDT0;
-  amount: string;
+type X402Configuration = {
+  apiKey: string;
+  secretKey: string;
+  passphrase: string;
   payTo: string;
-  maxTimeoutSeconds: number;
-  extra: { name: "USD₮0"; version: "1" };
+  price: string;
 };
 
-export type PaymentRequired = {
-  x402Version: 2;
-  resource: { url: string; description: string; mimeType: string };
-  accepts: PaymentRequirement[];
-};
-
-function publicOrigin() {
-  const configured = process.env.ASKSCOUT_PUBLIC_URL?.trim() || "https://askscout.xyz";
-  return new URL(configured).origin;
+function requiredEnv(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`Missing required environment variable ${name}`);
+  return value;
 }
 
-function payTo() {
-  const configured = process.env.PAY_TO?.trim() || SCOUT_OWNER_WALLET;
-  if (!/^0x[a-fA-F0-9]{40}$/.test(configured)) {
-    throw new Error("PAY_TO must be an EVM address");
+function configuration(): X402Configuration {
+  const payTo = process.env.PAY_TO?.trim() || process.env.PAY_TO_ADDRESS?.trim() || SCOUT_OWNER_WALLET;
+  if (!/^0x[a-fA-F0-9]{40}$/.test(payTo)) {
+    throw new Error("PAY_TO must be a valid EVM receiving-wallet address");
   }
-  return configured;
+
+  return {
+    apiKey: requiredEnv("OKX_API_KEY"),
+    secretKey: requiredEnv("OKX_SECRET_KEY"),
+    passphrase: requiredEnv("OKX_PASSPHRASE"),
+    payTo,
+    price: process.env.X402_PRICE_USD?.trim() || DEFAULT_PRICE,
+  };
 }
 
+let initializingServer: Promise<x402HTTPResourceServer> | undefined;
+
 /**
- * Builds the public x402 v2 offer used by OKX's pre-payment check. It is
- * intentionally independent of seller API credentials: discovering a paid
- * endpoint must not fail before a buyer can read its accepted payment option.
+ * Initialises the authenticated OKX facilitator once per warm serverless
+ * runtime. The SDK verifies EIP-3009 authorizations and settles the accepted
+ * payment before Scout returns a report.
  */
-export function createPaymentRequired(pathname: string): PaymentRequired {
+export function getX402Server() {
+  if (!initializingServer) {
+    initializingServer = (async () => {
+      const config = configuration();
+      const facilitator = new OKXFacilitatorClient({
+        apiKey: config.apiKey,
+        secretKey: config.secretKey,
+        passphrase: config.passphrase,
+        syncSettle: true,
+      });
+      const resourceServer = new x402ResourceServer(facilitator).register(
+        X_LAYER_NETWORK,
+        new ExactEvmScheme()
+      );
+      const server = new x402HTTPResourceServer(resourceServer, {
+        "GET /api/v1/analyze": routeConfig(config),
+        "POST /api/v1/analyze": routeConfig(config),
+      });
+
+      await server.initialize();
+      console.info("[x402] OKX facilitator initialized", { network: X_LAYER_NETWORK });
+      return server;
+    })().catch((error) => {
+      // A transient facilitator failure must not poison later warm invocations.
+      initializingServer = undefined;
+      throw error;
+    });
+  }
+  return initializingServer;
+}
+
+function routeConfig(config: X402Configuration): RouteConfig {
   return {
-    x402Version: 2,
-    resource: {
-      url: `${publicOrigin()}${pathname}`,
-      description: "Scout evidence-based token research and risk-analysis report",
-      mimeType: "application/json",
+    resource: "/api/v1/analyze",
+    description: "Scout evidence-based token research and risk-analysis report",
+    mimeType: "application/json",
+    accepts: {
+      scheme: "exact",
+      network: X_LAYER_NETWORK,
+      payTo: config.payTo,
+      price: config.price,
+      maxTimeoutSeconds: 300,
     },
-    accepts: [
-      {
-        scheme: "exact",
-        network: X_LAYER_NETWORK,
-        asset: X_LAYER_USDT0,
-        amount: process.env.X402_PRICE_ATOMIC?.trim() || PRICE_ATOMIC,
-        payTo: payTo(),
-        maxTimeoutSeconds: 300,
-        extra: { name: "USD₮0", version: "1" },
-      },
-    ],
   };
 }
 
-function encode(value: unknown) {
-  return Buffer.from(JSON.stringify(value)).toString("base64");
+function paymentHeader(request: NextRequest) {
+  return request.headers.get(X402_PAYMENT_HEADER) || request.headers.get(X402_LEGACY_PAYMENT_HEADER) || undefined;
 }
 
-export function paymentRequiredHeaders(requirements: PaymentRequired) {
+/** Converts a Next request into the SDK's framework-neutral HTTP adapter. */
+export function requestContext(request: NextRequest) {
+  const adapter: HTTPAdapter = {
+    getHeader: (name) => {
+      const normalized = name.toLowerCase();
+      if (normalized === X402_PAYMENT_HEADER.toLowerCase() || normalized === X402_LEGACY_PAYMENT_HEADER.toLowerCase()) {
+        return paymentHeader(request);
+      }
+      return request.headers.get(name) || request.headers.get(normalized) || undefined;
+    },
+    getMethod: () => request.method,
+    getPath: () => request.nextUrl.pathname,
+    getUrl: () => request.url,
+    getAcceptHeader: () => request.headers.get("accept") || "application/json",
+    getUserAgent: () => request.headers.get("user-agent") || "",
+  };
+
   return {
-    [X402_REQUIRED_HEADER]: encode(requirements),
-    "X-Payment-Protocol": "x402",
+    adapter,
+    path: request.nextUrl.pathname,
+    method: request.method,
+    paymentHeader: paymentHeader(request),
   };
 }
 
-/**
- * Until a settlement provider is configured, a replay is safely challenged
- * again. This prevents a report from being delivered without a verified
- * payment while still keeping the endpoint discoverable to buyer prechecks.
- */
-export function isPaymentReplay(request: NextRequest) {
-  return Boolean(request.headers.get(X402_PAYMENT_HEADER));
+export async function negotiatePayment(request: NextRequest): Promise<HTTPProcessResult> {
+  const server = await getX402Server();
+  return server.processHTTPRequest(requestContext(request));
+}
+
+export async function settlePayment(result: Extract<HTTPProcessResult, { type: "payment-verified" }>) {
+  const server = await getX402Server();
+  return server.processSettlement(
+    result.paymentPayload,
+    result.paymentRequirements,
+    result.declaredExtensions
+  );
+}
+
+/** Mirrors the SDK's encoded 402 offer in JSON for simple HTTP clients. */
+export function paymentRequiredBody(headers: Record<string, string>, fallback: unknown) {
+  const encoded = Object.entries(headers).find(([key]) => key.toLowerCase() === X402_REQUIRED_HEADER.toLowerCase())?.[1];
+  if (!encoded) return fallback;
+
+  try {
+    const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  } catch {
+    return fallback;
+  }
 }
